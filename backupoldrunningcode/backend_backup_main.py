@@ -13,11 +13,9 @@ from sklearn.metrics import accuracy_score, mean_squared_error
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import LabelEncoder
 from sklearn.preprocessing import StandardScaler
-from flask_cors import CORS
-
 
 app = Flask(__name__)
-CORS(app)
+
 scaler = StandardScaler()
 
 # Configuration
@@ -67,76 +65,43 @@ def upload_file():
 @app.route('/train', methods=['POST'])
 def train_model():
     data_filename = request.json.get('filename')
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], data_filename)
-    if not data_filename or not os.path.exists(file_path):
+    if not data_filename or not os.path.exists(os.path.join(app.config['UPLOAD_FOLDER'], data_filename)):
         return jsonify({'error': 'File not found'}), 404
 
     try:
-        # Load the dataset
-        data = pd.read_csv(file_path)
+        data = pd.read_csv(os.path.join(app.config['UPLOAD_FOLDER'], data_filename))
         if data.empty or data.shape[1] < 2:
             return jsonify({'error': 'Invalid or insufficient data'}), 400
-
-        # Separate features and target
+        
         X = data.iloc[:, :-1]
         y = data.iloc[:, -1]
 
-        # Initialize scaler and label encoder
         scaler = StandardScaler()
-        le = LabelEncoder()
-
-        # Check if the target variable is categorical
-        if y.dtype == 'object':
-            y = le.fit_transform(y)
-            model = LogisticRegression(max_iter=200)
-            is_classification = True
-        else:
-            model = LinearRegression()
-            is_classification = False
-
-        # Scale features
         X_scaled = scaler.fit_transform(X)
 
-        # Split the dataset into training and testing sets
-        X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.3, random_state=42)
+        le = LabelEncoder()
+        y_encoded = le.fit_transform(y)
 
-        # Train the model
-        model.fit(X_train, y_train)
+        model = LogisticRegression(max_iter=200)
+        model.fit(X_scaled, y_encoded)
 
-        # Evaluation
-        if is_classification:
-            y_pred = model.predict(X_test)
-            score = accuracy_score(y_test, y_pred)
-            metric = 'accuracy'
-        else:
-            y_pred = model.predict(X_test)
-            score = mean_squared_error(y_test, y_pred)
-            metric = 'mean_squared_error'
-
-        # Save the trained model and scaler
         model_filename = 'model.pkl'
         model_path = os.path.join(app.config['MODEL_FOLDER'], model_filename)
         joblib.dump(model, model_path)
+
+        le_filename = 'label_encoder.pkl'
+        le_path = os.path.join(app.config['MODEL_FOLDER'], le_filename)
+        joblib.dump(le, le_path)
 
         scaler_filename = 'scaler.pkl'
         scaler_path = os.path.join(app.config['MODEL_FOLDER'], scaler_filename)
         joblib.dump(scaler, scaler_path)
 
-        # If classification, save the label encoder
-        if is_classification:
-            le_filename = 'label_encoder.pkl'
-            le_path = os.path.join(app.config['MODEL_FOLDER'], le_filename)
-            joblib.dump(le, le_path)
-
-        # Send back a success response with evaluation metrics
-        return jsonify({
-            'message': 'Model trained successfully',
-            'model_path': model_path,
-            'evaluation': {metric: score}
-        }), 200
+        return jsonify({'message': 'Model trained successfully', 'model_path': model_path}), 200
     except Exception as e:
-        app.logger.error(f'An error occurred during training: {str(e)}')
-        return jsonify({'error': str(e)}), 500
+        app.logger.error(f'An error occurred during training: {e}')
+        return jsonify({'error': 'An error occurred during training'}), 500
+
     
 
 @app.route('/predict', methods=['POST'])
